@@ -1,5 +1,6 @@
 -- Zoho Email Automation — Supabase schema
 -- Run this in the Supabase SQL editor after creating the project.
+-- Idempotent: safe to re-run after upgrading from an earlier version.
 
 create extension if not exists "pgcrypto";
 
@@ -10,11 +11,10 @@ create table if not exists public.templates (
   name         text not null,
   subject      text not null default '',
   html_body    text not null default '',
-  attachments  jsonb not null default '[]'::jsonb, -- [{url, name, size, type}]
+  attachments  jsonb not null default '[]'::jsonb,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
-
 create index if not exists templates_user_idx on public.templates(user_id);
 
 -- === automations =================================================
@@ -32,20 +32,31 @@ create table if not exists public.automations (
   schedule_cron text not null,
   timezone      text not null default 'America/Los_Angeles',
   status        automation_status not null default 'active',
+  test_mode     boolean not null default true,
   next_run_at   timestamptz,
   last_run_at   timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+-- upgrade-safe: add column if the table pre-existed
+alter table public.automations add column if not exists test_mode boolean not null default true;
 
-create index if not exists automations_user_idx   on public.automations(user_id);
-create index if not exists automations_due_idx    on public.automations(next_run_at)
+create index if not exists automations_user_idx on public.automations(user_id);
+create index if not exists automations_due_idx  on public.automations(next_run_at)
   where status = 'active';
 
 -- === runs ========================================================
 do $$ begin
-  create type run_status as enum ('success', 'error', 'skipped');
+  create type run_status as enum ('success', 'error', 'skipped', 'pending_approval', 'approved');
 exception when duplicate_object then null; end $$;
+
+-- upgrade-safe: add new enum values if the type already existed
+do $$ begin
+  alter type run_status add value if not exists 'pending_approval';
+exception when others then null; end $$;
+do $$ begin
+  alter type run_status add value if not exists 'approved';
+exception when others then null; end $$;
 
 create table if not exists public.runs (
   id                uuid primary key default gen_random_uuid(),
@@ -55,10 +66,17 @@ create table if not exists public.runs (
   recipient_count   integer not null default 0,
   zoho_campaign_id  text,
   status            run_status not null default 'success',
-  error             text
+  error             text,
+  snapshot          jsonb,        -- {subject, html, emails[], campaignName}
+  approval_token    uuid,         -- present when status='pending_approval'
+  approved_at       timestamptz
 );
+alter table public.runs add column if not exists snapshot jsonb;
+alter table public.runs add column if not exists approval_token uuid;
+alter table public.runs add column if not exists approved_at timestamptz;
 
 create index if not exists runs_automation_idx on public.runs(automation_id, started_at desc);
+create index if not exists runs_pending_idx    on public.runs(approval_token) where approval_token is not null;
 
 -- === updated_at trigger ==========================================
 create or replace function public.set_updated_at()
@@ -95,7 +113,7 @@ create policy "runs owner" on public.runs
             where a.id = runs.automation_id and a.user_id = auth.uid())
   );
 
--- === storage bucket for images + attachments ====================
+-- === storage bucket =============================================
 insert into storage.buckets (id, name, public)
 values ('email-assets', 'email-assets', true)
 on conflict (id) do nothing;

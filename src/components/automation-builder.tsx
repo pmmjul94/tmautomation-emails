@@ -2,41 +2,53 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Wand2, Save } from "lucide-react";
+import Link from "next/link";
+import { Sparkles, Wand2, Save, TestTube2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { AttachmentPicker } from "@/components/attachment-picker";
+import { ScheduleBuilder } from "@/components/schedule-builder";
+import { RecipientsPreview } from "@/components/recipients-preview";
+import { EmailPreview } from "@/components/email-preview";
 import { useToast } from "@/components/toast";
-import { INDUSTRIES, INDUSTRY_KEYS, industryLabel } from "@/lib/industries";
+import { INDUSTRY_KEYS, industryLabel } from "@/lib/industries";
 import type { Attachment, Automation, ParsedRule } from "@/lib/types";
 
 type TemplateLite = { id: string; name: string };
+type Props = { templates: TemplateLite[]; initial?: Automation };
 
-type Props = {
-  templates: TemplateLite[];
-  initial?: Automation;
+const EXAMPLE = "Send email to all restaurants in 90210 with the 'Spring Menu' template every Tuesday at 10am PST.";
+
+const DEFAULT_RULE: ParsedRule = {
+  name: "New automation",
+  industry: "restaurants",
+  zip_codes: [],
+  template_id: null,
+  template_hint: null,
+  attachments: [],
+  schedule_cron: "0 10 * * 2",
+  timezone: "America/Los_Angeles",
 };
-
-const EXAMPLE =
-  "Send email to all restaurants in 90210 with the 'Spring Menu' template every Tuesday at 10am PST.";
 
 export function AutomationBuilder({ templates, initial }: Props) {
   const router = useRouter();
   const toast = useToast();
 
   const [prompt, setPrompt] = useState(initial?.nl_prompt ?? "");
-  const [rule, setRule] = useState<ParsedRule | null>(
-    initial ? (initial.parsed_rule as ParsedRule) : null,
+  const [rule, setRule] = useState<ParsedRule>(
+    initial ? (initial.parsed_rule as ParsedRule) : DEFAULT_RULE,
   );
+  const [status, setStatus] = useState<"active" | "paused">(initial?.status ?? "active");
+  const [testMode, setTestMode] = useState<boolean>(initial?.test_mode ?? true);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<"active" | "paused">(initial?.status ?? "active");
+  const [zipsInput, setZipsInput] = useState<string>(rule.zip_codes.join(", "));
 
-  useEffect(() => { if (initial) setRule(initial.parsed_rule as ParsedRule); }, [initial]);
+  useEffect(() => { setZipsInput(rule.zip_codes.join(", ")); }, [rule.zip_codes.join(",")]); // eslint-disable-line
 
   async function parse() {
     if (!prompt.trim()) return;
@@ -50,21 +62,26 @@ export function AutomationBuilder({ templates, initial }: Props) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Parse failed");
       setRule(json.rule as ParsedRule);
-      toast({ title: "Parsed!", description: "Review the fields below and save.", variant: "success" });
+      toast({ title: "Parsed!", description: "Review the fields below.", variant: "success" });
     } catch (e: any) {
       toast({ title: "Couldn't parse prompt", description: e.message, variant: "error" });
     } finally { setParsing(false); }
   }
 
+  function updateRule<K extends keyof ParsedRule>(key: K, val: ParsedRule[K]) {
+    setRule((r) => ({ ...r, [key]: val }));
+  }
+
   async function save() {
-    if (!rule) { toast({ title: "Parse the prompt first", variant: "error" }); return; }
+    if (!rule.name.trim()) { toast({ title: "Name is required", variant: "error" }); return; }
     if (!rule.template_id) { toast({ title: "Pick a template", variant: "error" }); return; }
+    if (rule.zip_codes.length === 0) { toast({ title: "Add at least one ZIP code", variant: "error" }); return; }
     setSaving(true);
     try {
       const url = initial ? `/api/automations/${initial.id}` : "/api/automations";
       const body = initial
-        ? { rule, nl_prompt: prompt, status }
-        : { rule, nl_prompt: prompt };
+        ? { rule, nl_prompt: prompt, status, test_mode: testMode }
+        : { rule, nl_prompt: prompt, test_mode: testMode };
       const res = await fetch(url, {
         method: initial ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -88,122 +105,187 @@ export function AutomationBuilder({ templates, initial }: Props) {
     else toast({ title: "Delete failed", description: await res.text(), variant: "error" });
   }
 
-  const updateRule = <K extends keyof ParsedRule>(key: K, val: ParsedRule[K]) =>
-    setRule((r) => (r ? { ...r, [key]: val } : r));
-
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Sparkles className="h-4 w-4" />Describe your automation</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={4}
-            placeholder={EXAMPLE}
-          />
-          <div className="flex items-center gap-2">
-            <Button onClick={parse} disabled={parsing || !prompt.trim()} variant="outline">
-              <Wand2 className="h-4 w-4" />{parsing ? "Parsing…" : "Parse with Gemini"}
-            </Button>
-            {!initial && !prompt && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setPrompt(EXAMPLE)}>Use example</Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {rule && (
+    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+      <div className="space-y-6">
+        {/* 1. AI quickfill */}
         <Card>
           <CardHeader>
-            <CardTitle>Confirm & edit</CardTitle>
+            <CardTitle className="flex items-center gap-2"><Sparkles className="h-4 w-4" />Describe it in plain English (optional)</CardTitle>
+            <CardDescription>Gemini will pre-fill the fields below. You can also skip this and set everything manually.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
-            <Field label="Name">
-              <Input value={rule.name} onChange={(e) => updateRule("name", e.target.value)} />
-            </Field>
-
-            <Field label="Industry">
-              <Select value={rule.industry} onValueChange={(v) => updateRule("industry", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {INDUSTRY_KEYS.map((k) => (
-                    <SelectItem key={k} value={k}>{industryLabel(k)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Field label="ZIP codes (comma-separated)" className="md:col-span-2">
-              <Input
-                value={rule.zip_codes.join(", ")}
-                onChange={(e) =>
-                  updateRule("zip_codes",
-                    e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
-                  )
-                }
-              />
-            </Field>
-
-            <Field label="Template">
-              <Select value={rule.template_id ?? ""} onValueChange={(v) => updateRule("template_id", v || null)}>
-                <SelectTrigger><SelectValue placeholder="Select a template" /></SelectTrigger>
-                <SelectContent>
-                  {templates.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No templates — create one first.</div>}
-                  {templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {rule.template_hint && !rule.template_id && (
-                <p className="text-xs text-amber-600">Couldn't match template "{rule.template_hint}" — pick one above.</p>
-              )}
-            </Field>
-
-            <Field label="Timezone">
-              <Input value={rule.timezone} onChange={(e) => updateRule("timezone", e.target.value)} />
-            </Field>
-
-            <Field label="Cron schedule" className="md:col-span-2">
-              <Input value={rule.schedule_cron} onChange={(e) => updateRule("schedule_cron", e.target.value)} />
-              <p className="text-xs text-muted-foreground">5-field cron in the selected timezone. Example: <code>0 10 * * 2</code> = every Tuesday 10:00.</p>
-            </Field>
-
-            <Field label="Extra attachments" className="md:col-span-2">
-              <AttachmentPicker value={rule.attachments ?? []} onChange={(v) => updateRule("attachments", v as Attachment[])} />
-              <p className="text-xs text-muted-foreground">Appended to the template's own attachments at send time.</p>
-            </Field>
-
-            {initial && (
-              <Field label="Status">
-                <Select value={status} onValueChange={(v) => setStatus(v as "active" | "paused")}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="paused">Paused</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
+          <CardContent className="space-y-3">
+            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder={EXAMPLE} />
+            <div className="flex items-center gap-2">
+              <Button type="button" onClick={parse} disabled={parsing || !prompt.trim()} variant="outline">
+                <Wand2 className="h-4 w-4" />{parsing ? "Parsing…" : "AI quick-fill"}
+              </Button>
+              {!prompt && <Button type="button" variant="ghost" size="sm" onClick={() => setPrompt(EXAMPLE)}>Use example</Button>}
+            </div>
           </CardContent>
         </Card>
-      )}
 
-      <div className="flex items-center justify-between">
-        <Button onClick={save} disabled={!rule || saving}>
-          <Save className="h-4 w-4" />{saving ? "Saving…" : initial ? "Save changes" : "Create automation"}
-        </Button>
-        {initial && <Button variant="destructive" onClick={remove}>Delete</Button>}
+        {/* 2. Name */}
+        <Card>
+          <CardHeader><CardTitle className="text-base">Name</CardTitle></CardHeader>
+          <CardContent>
+            <Input value={rule.name} onChange={(e) => updateRule("name", e.target.value)} placeholder="Spring menu promo to 90210 restaurants" />
+          </CardContent>
+        </Card>
+
+        {/* 3. Audience */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Audience</CardTitle>
+            <CardDescription>Who in Zoho CRM gets this?</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Industry</Label>
+                <Select value={rule.industry} onValueChange={(v) => updateRule("industry", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {INDUSTRY_KEYS.map((k) => <SelectItem key={k} value={k}>{industryLabel(k)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>ZIP codes</Label>
+                <Input
+                  value={zipsInput}
+                  onChange={(e) => setZipsInput(e.target.value)}
+                  onBlur={() => updateRule("zip_codes", zipsInput.split(",").map((s) => s.trim()).filter(Boolean))}
+                  placeholder="90210, 90211"
+                />
+                <p className="text-xs text-muted-foreground">Comma-separated US 5-digit ZIPs.</p>
+              </div>
+            </div>
+            <RecipientsPreview industry={rule.industry} zipCodes={rule.zip_codes} />
+          </CardContent>
+        </Card>
+
+        {/* 4. Email */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">What they'll get</CardTitle>
+            <CardDescription>Pick a saved template.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
+              <div className="space-y-1.5">
+                <Label>Template</Label>
+                <Select value={rule.template_id ?? ""} onValueChange={(v) => updateRule("template_id", v || null)}>
+                  <SelectTrigger><SelectValue placeholder="Select a template" /></SelectTrigger>
+                  <SelectContent>
+                    {templates.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No templates yet.</div>}
+                    {templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {rule.template_hint && !rule.template_id && (
+                  <p className="text-xs text-amber-600">Couldn't match "{rule.template_hint}" — pick one above.</p>
+                )}
+              </div>
+              <div className="flex items-end">
+                <Button asChild variant="outline" size="sm"><Link href="/templates/new">New template</Link></Button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Extra attachments (optional)</Label>
+              <AttachmentPicker value={rule.attachments ?? []} onChange={(v) => updateRule("attachments", v as Attachment[])} />
+              <p className="text-xs text-muted-foreground">Appended to the template's own attachments at send time.</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* 5. Schedule */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">When</CardTitle>
+            <CardDescription>Pick a schedule.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScheduleBuilder
+              cron={rule.schedule_cron}
+              timezone={rule.timezone}
+              onChange={({ cron, timezone }) => setRule((r) => ({ ...r, schedule_cron: cron, timezone }))}
+            />
+          </CardContent>
+        </Card>
+
+        {/* 6. Test mode */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base"><TestTube2 className="h-4 w-4" />Approval before send</CardTitle>
+            <CardDescription>While this is on, every scheduled run sends a preview to reviewers who must click "Approve &amp; send" before real contacts receive anything.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <div className="font-medium">Test / approval mode</div>
+                <div className="text-sm text-muted-foreground">
+                  {testMode ? "On — preview sent to reviewers first, real send only after approval." : "Off — campaigns go out directly to matching contacts at the scheduled time."}
+                </div>
+              </div>
+              <Switch checked={testMode} onChange={setTestMode} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Reviewers (env <code>TEST_RECIPIENTS</code>): <code>wais@textmunication.com</code>, <code>ab@caazllc.com</code>. Change by setting <code>TEST_RECIPIENTS=a@x.com,b@y.com</code> in Vercel.
+            </p>
+          </CardContent>
+        </Card>
+
+        {initial && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Status</CardTitle></CardHeader>
+            <CardContent>
+              <Select value={status} onValueChange={(v) => setStatus(v as "active" | "paused")}>
+                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="paused">Paused</SelectItem>
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="flex items-center justify-between">
+          <Button onClick={save} disabled={saving}>
+            <Save className="h-4 w-4" />{saving ? "Saving…" : initial ? "Save changes" : "Create automation"}
+          </Button>
+          {initial && (
+            <Button variant="destructive" onClick={remove}>
+              <Trash2 className="h-4 w-4" />Delete
+            </Button>
+          )}
+        </div>
       </div>
+
+      <aside className="space-y-4 lg:sticky lg:top-6 self-start">
+        <EmailPreview templateId={rule.template_id} extraAttachments={rule.attachments} />
+      </aside>
     </div>
   );
 }
 
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className={`space-y-1.5 ${className ?? ""}`}>
-      <Label>{label}</Label>
-      {children}
-    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+        checked ? "bg-primary" : "bg-muted"
+      }`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-background shadow ring-0 transition ${
+          checked ? "translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
   );
 }

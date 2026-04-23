@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StarterTemplatesButton } from "@/components/starter-templates";
 import { formatDate } from "@/lib/utils";
 
 export default async function TemplatesPage() {
@@ -16,9 +17,12 @@ export default async function TemplatesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Templates</h1>
-        <Button asChild>
-          <Link href="/templates/new"><Plus className="h-4 w-4" />New template</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <StarterTemplatesButton />
+          <Button asChild>
+            <Link href="/templates/new"><Plus className="h-4 w-4" />New template</Link>
+          </Button>
+        </div>
       </div>
 
       {(templates ?? []).length === 0 ? (

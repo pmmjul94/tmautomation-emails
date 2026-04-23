@@ -230,3 +230,31 @@ export async function sendCampaign(args: {
 
   return { campaignKey, recipientCount: contacts.length };
 }
+
+/**
+ * Sends a test email to a fixed list of reviewers, via the same Campaigns flow.
+ * Used for the approve-before-send flow.
+ */
+export async function sendTestEmail(args: {
+  campaignName: string;
+  subject: string;
+  htmlBody: string;
+  testRecipients: string[];
+  fromEmail?: string;
+  fromName?: string;
+}): Promise<CampaignResult> {
+  const contacts: ZohoContact[] = args.testRecipients.map((email, i) => ({
+    id: `test-${i}`,
+    Email: email,
+    First_Name: "Reviewer",
+    Last_Name: "",
+  }));
+  return sendCampaign({
+    campaignName: `[TEST] ${args.campaignName}`.slice(0, 120),
+    subject: `[TEST — Approve to send] ${args.subject}`,
+    htmlBody: args.htmlBody,
+    contacts,
+    fromEmail: args.fromEmail,
+    fromName: args.fromName,
+  });
+}

@@ -2,10 +2,10 @@
 // Edit the right-hand side to match the exact picklist values in your CRM.
 
 export const INDUSTRIES = {
-  restaurants: "Restaurants",
+  restaurants: "Restaurant",
   "health-fitness": "Health & Fitness",
-  "non-profit": "Non-Profit",
-  "retail-ecomm": "Retail/Ecommerce",
+  "non-profit": "Nonprofit",
+  "retail-ecomm": "Retail",
 } as const;
 
 export type IndustryKey = keyof typeof INDUSTRIES;

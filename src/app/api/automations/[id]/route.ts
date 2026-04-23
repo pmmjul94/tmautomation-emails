@@ -18,6 +18,7 @@ const ruleSchema = z.object({
 const patchSchema = z.object({
   rule: ruleSchema.optional(),
   status: z.enum(["active", "paused"]).optional(),
+  test_mode: z.boolean().optional(),
   nl_prompt: z.string().optional(),
 });
 
@@ -43,6 +44,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     update.next_run_at = nextRunDate(rule.schedule_cron, rule.timezone).toISOString();
   }
   if (parsed.data.status) update.status = parsed.data.status;
+  if (parsed.data.test_mode !== undefined) update.test_mode = parsed.data.test_mode;
   if (parsed.data.nl_prompt !== undefined) update.nl_prompt = parsed.data.nl_prompt;
 
   const { error } = await supabase.from("automations").update(update).eq("id", params.id);

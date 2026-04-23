@@ -18,6 +18,7 @@ const ruleSchema = z.object({
 const bodySchema = z.object({
   nl_prompt: z.string().min(1),
   rule: ruleSchema,
+  test_mode: z.boolean().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
 
-  const { nl_prompt, rule } = parsed.data;
+  const { nl_prompt, rule, test_mode } = parsed.data;
 
   const cronErr = validateCron(rule.schedule_cron, rule.timezone);
   if (cronErr) return NextResponse.json({ error: cronErr }, { status: 400 });
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
       schedule_cron: rule.schedule_cron,
       timezone: rule.timezone,
       status: "active",
+      test_mode: test_mode ?? true,
       next_run_at,
     })
     .select("id").single();

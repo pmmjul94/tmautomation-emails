@@ -4,7 +4,8 @@ import { AutomationBuilder } from "@/components/automation-builder";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
-import type { Automation, Run } from "@/lib/types";
+import { describeCron } from "@/lib/cron-describe";
+import type { Automation, Run, RunSnapshot } from "@/lib/types";
 
 export default async function AutomationDetailPage({ params }: { params: { id: string } }) {
   const { supabase } = await requireUser();
@@ -12,17 +13,17 @@ export default async function AutomationDetailPage({ params }: { params: { id: s
   const [{ data: automation }, { data: templates }, { data: runs }] = await Promise.all([
     supabase.from("automations").select("*").eq("id", params.id).maybeSingle(),
     supabase.from("templates").select("id, name").order("name"),
-    supabase.from("runs").select("*").eq("automation_id", params.id).order("started_at", { ascending: false }).limit(20),
+    supabase.from("runs").select("*").eq("automation_id", params.id).order("started_at", { ascending: false }).limit(25),
   ]);
 
   if (!automation) notFound();
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="mx-auto max-w-6xl space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold">Edit automation</h1>
+        <h1 className="text-2xl font-semibold">{automation.name}</h1>
         <p className="text-sm text-muted-foreground">
-          Next run: {formatDate(automation.next_run_at)} · Last run: {formatDate(automation.last_run_at)}
+          {describeCron(automation.schedule_cron, automation.timezone)} · Next: {formatDate(automation.next_run_at)} · Last: {formatDate(automation.last_run_at)}
         </p>
       </div>
 
@@ -34,22 +35,38 @@ export default async function AutomationDetailPage({ params }: { params: { id: s
         </CardHeader>
         <CardContent>
           {(runs ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No runs yet. The cron will pick this up at the next due time.</p>
+            <p className="text-sm text-muted-foreground">No runs yet. The cron picks this up at the next due time.</p>
           ) : (
             <ul className="divide-y">
-              {(runs as Run[]).map((r) => (
-                <li key={r.id} className="flex items-start justify-between py-2 text-sm">
-                  <div className="min-w-0">
-                    <div className="font-medium">{formatDate(r.started_at)}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {r.recipient_count} recipients
-                      {r.zoho_campaign_id && <> · campaign <code className="rounded bg-muted px-1">{r.zoho_campaign_id}</code></>}
+              {(runs as Run[]).map((r) => {
+                const snap = r.snapshot as RunSnapshot | null;
+                return (
+                  <li key={r.id} className="flex items-start justify-between py-3 text-sm">
+                    <div className="min-w-0 space-y-1">
+                      <div className="font-medium">{formatDate(r.started_at)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {r.recipient_count} recipient{r.recipient_count === 1 ? "" : "s"}
+                        {r.zoho_campaign_id && <> · campaign <code className="rounded bg-muted px-1">{r.zoho_campaign_id}</code></>}
+                      </div>
+                      {r.status === "pending_approval" && snap && (
+                        <div className="text-xs text-amber-600">
+                          Waiting for a reviewer to click "Approve &amp; send" in the test email.
+                          {snap.emails && <> Target: {snap.emails.length} contacts.</>}
+                        </div>
+                      )}
+                      {r.error && <div className="mt-1 text-xs text-destructive break-all">{r.error}</div>}
                     </div>
-                    {r.error && <div className="mt-1 text-xs text-destructive break-all">{r.error}</div>}
-                  </div>
-                  <Badge variant={r.status === "success" ? "success" : r.status === "error" ? "destructive" : "secondary"}>{r.status}</Badge>
-                </li>
-              ))}
+                    <Badge variant={
+                      r.status === "success" || r.status === "approved" ? "success"
+                      : r.status === "error" ? "destructive"
+                      : r.status === "pending_approval" ? "warning"
+                      : "secondary"
+                    }>
+                      {r.status === "pending_approval" ? "pending approval" : r.status}
+                    </Badge>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>

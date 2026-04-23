@@ -37,10 +37,21 @@ export type Automation = {
   schedule_cron: string;
   timezone: string;
   status: "active" | "paused";
+  test_mode: boolean;
   next_run_at: string | null;
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type RunStatus = "success" | "error" | "skipped" | "pending_approval" | "approved";
+
+export type RunSnapshot = {
+  subject: string;
+  html: string;
+  emails: string[];
+  campaignName: string;
+  contacts?: { email: string; first?: string | null; last?: string | null }[];
 };
 
 export type Run = {
@@ -50,6 +61,9 @@ export type Run = {
   finished_at: string | null;
   recipient_count: number;
   zoho_campaign_id: string | null;
-  status: "success" | "error" | "skipped";
+  status: RunStatus;
   error: string | null;
+  snapshot: RunSnapshot | null;
+  approval_token: string | null;
+  approved_at: string | null;
 };

@@ -1,18 +1,19 @@
 import Link from "next/link";
-import { Plus, Clock } from "lucide-react";
+import { Plus, Clock, TestTube2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { industryLabel } from "@/lib/industries";
+import { describeCron } from "@/lib/cron-describe";
 import type { ParsedRule } from "@/lib/types";
 
 export default async function AutomationsListPage() {
   const { supabase } = await requireUser();
   const { data: automations } = await supabase
     .from("automations")
-    .select("id, name, status, next_run_at, last_run_at, schedule_cron, timezone, parsed_rule")
+    .select("id, name, status, test_mode, next_run_at, last_run_at, schedule_cron, timezone, parsed_rule")
     .order("created_at", { ascending: false });
 
   return (
@@ -39,13 +40,17 @@ export default async function AutomationsListPage() {
                 <Card className="transition-colors hover:bg-accent">
                   <CardContent className="flex items-center justify-between p-4">
                     <div className="min-w-0 space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <div className="truncate font-medium">{a.name}</div>
                         <Badge variant={a.status === "active" ? "success" : "secondary"}>{a.status}</Badge>
+                        {a.test_mode && (
+                          <Badge variant="warning" className="gap-1"><TestTube2 className="h-3 w-3" />Approval required</Badge>
+                        )}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {industryLabel(rule.industry)} · ZIPs: {rule.zip_codes.join(", ")} · {a.schedule_cron} ({a.timezone})
+                      <div className="text-sm text-muted-foreground">
+                        {industryLabel(rule.industry)} · {rule.zip_codes.join(", ")}
                       </div>
+                      <div className="text-xs text-muted-foreground">{describeCron(a.schedule_cron, a.timezone)}</div>
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
                       <div className="flex items-center justify-end gap-1"><Clock className="h-3 w-3" />Next: {formatDate(a.next_run_at)}</div>
